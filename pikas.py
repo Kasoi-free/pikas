@@ -38,13 +38,16 @@ dtype = torch.float16
 
 step = 8  # Options: [1,2,4,8]
 repo = "ByteDance/AnimateDiff-Lightning"
-ckpt = f"animatediff_lightning_{step}step_diffusers.safetensors"
+ckpt = f"animatediff_lightning_8step_diffusers.safetensors"
 base = "emilianJR/epiCRealism"  # Choose your favorite base model.
 
 adapter = MotionAdapter().to(device, dtype)
 adapter.load_state_dict(load_file(hf_hub_download(repo, ckpt), device=device))
 anim_pipe = AnimateDiffPipeline.from_pretrained(base, motion_adapter=adapter, torch_dtype=dtype).to(device)
 anim_pipe.scheduler = EulerDiscreteScheduler.from_config(anim_pipe.scheduler.config, timestep_spacing="trailing", beta_schedule="linear")
+
+# State tracking variable
+last_function_called = None
 
 # Slash command 1
 @slash_command(name="genpic",
@@ -88,6 +91,8 @@ async def animate(ctx: SlashContext, text: str):
 
 # GENERATING IMAGE
 def generating_image(prompt):
+    global last_function_called
+
     try:
         translated_text = translator.translate(prompt, dest='en')
         new_text = str(translated_text.text)
@@ -99,10 +104,17 @@ def generating_image(prompt):
     filename = "pic.png"
     image.save(filename)
 
+    # Conditionally flush CUDA cache
+    if last_function_called == "generating_animation":
+        torch.cuda.empty_cache()
+
+    last_function_called = "generating_image"
     return filename, new_text
 
 # GENERATING ANIMATION
 def generating_animation(prompt):
+    global last_function_called
+
     try:
         translated_text = translator.translate(prompt, dest='en')
         new_text = str(translated_text.text)
@@ -114,6 +126,11 @@ def generating_animation(prompt):
     filename = "animation.gif"
     export_to_gif(output.frames[0], filename)
 
+    # Conditionally flush CUDA cache
+    if last_function_called == "generating_image":
+        torch.cuda.empty_cache()
+
+    last_function_called = "generating_animation"
     return filename, new_text
 
 bot.start(bot_token)
